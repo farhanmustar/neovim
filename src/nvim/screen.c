@@ -1964,19 +1964,21 @@ static void apply_cursorline_highlight(win_T *wp, linenr_T lnum, int *line_attr,
 }
 
 static int get_sign_attrs(buf_T *buf, linenr_T lnum, SignTextAttrs *sattrs, int *line_attr,
-                          int *num_attr, int *cul_attr)
+                          int *num_attr, int *cul_attr, int *cul_num_attr)
 {
   HlPriAttr line_attrs = { *line_attr, 0 };
   HlPriAttr num_attrs  = { *num_attr,  0 };
   HlPriAttr cul_attrs  = { *cul_attr,  0 };
+  HlPriAttr cul_num_attrs  = { *cul_num_attr,  0 };
 
   // TODO(bfredl, vigoux): line_attr should not take priority over decoration!
-  int num_signs = buf_get_signattrs(buf, lnum, sattrs, &num_attrs, &line_attrs, &cul_attrs);
+  int num_signs = buf_get_signattrs(buf, lnum, sattrs, &num_attrs, &line_attrs, &cul_attrs, &cul_num_attrs);
   decor_redraw_signs(buf, lnum - 1, &num_signs, sattrs, &num_attrs, &line_attrs, &cul_attrs);
 
   *line_attr = line_attrs.attr_id;
   *num_attr = num_attrs.attr_id;
   *cul_attr = cul_attrs.attr_id;
+  *cul_num_attr = cul_num_attrs.attr_id;
 
   return num_signs;
 }
@@ -2367,8 +2369,9 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
   SignTextAttrs sattrs[SIGN_SHOW_MAX];  // sign attributes for the sign column
   int sign_num_attr = 0;                // sign attribute for the number column
   int sign_cul_attr = 0;                // sign attribute for cursorline
+  int sign_cul_num_attr = 0;            // sign attribute for cursorline number column
   CLEAR_FIELD(sattrs);
-  int num_signs = get_sign_attrs(buf, lnum, sattrs, &line_attr, &sign_num_attr, &sign_cul_attr);
+  int num_signs = get_sign_attrs(buf, lnum, sattrs, &line_attr, &sign_num_attr, &sign_cul_attr, &sign_cul_num_attr);
 
   // Highlight the current line in the quickfix window.
   if (bt_quickfix(wp->w_buffer) && qf_current_entry(wp) == lnum) {
@@ -2698,7 +2701,9 @@ static int win_line(win_T *wp, linenr_T lnum, int startrow, int endrow, bool noc
             }
             c_final = NUL;
             n_extra = number_width(wp) + 1;
-            if (sign_num_attr > 0) {
+            if (sign_cul_num_attr > 0 && use_cursor_line_sign(wp, lnum)) {
+              char_attr = sign_cul_num_attr;
+            } else if (sign_num_attr > 0) {
               char_attr = sign_num_attr;
             } else {
               char_attr = get_line_number_attr(wp, lnum, row, startrow, filler_lines);

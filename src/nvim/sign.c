@@ -34,6 +34,7 @@ struct sign {
   int sn_line_hl;     // highlight ID for line
   int sn_text_hl;     // highlight ID for text
   int sn_cul_hl;      // highlight ID for text on current line when 'cursorline' is set
+  int sn_cul_num_hl;  // highlight ID for line number on current line when 'cursorline' is set
   int sn_num_hl;      // highlight ID for line number
 };
 
@@ -472,7 +473,7 @@ SignTextAttrs *sign_get_attr(int idx, SignTextAttrs sattrs[], int max_signs)
 /// @param sattrs Output array for attrs
 /// @return Number of signs of which attrs were found
 int buf_get_signattrs(buf_T *buf, linenr_T lnum, SignTextAttrs sattrs[], HlPriAttr *num_attrs,
-                      HlPriAttr *line_attrs, HlPriAttr *cul_attrs)
+                      HlPriAttr *line_attrs, HlPriAttr *cul_attrs, HlPriAttr *cul_num_attrs)
 {
   sign_entry_T *sign;
 
@@ -506,6 +507,7 @@ int buf_get_signattrs(buf_T *buf, linenr_T lnum, SignTextAttrs sattrs[], HlPriAt
       { line_attrs, sp->sn_line_hl },
       { num_attrs,  sp->sn_num_hl  },
       { cul_attrs,  sp->sn_cul_hl  },
+      { cul_num_attrs,  sp->sn_cul_num_hl  },
       { NULL, -1 },
     };
     for (int i = 0; cattrs[i].dest; i++) {
@@ -911,7 +913,7 @@ static int sign_define_init_text(sign_T *sp, char_u *text)
 
 /// Define a new sign or update an existing sign
 static int sign_define_by_name(char_u *name, char_u *icon, char_u *linehl, char_u *text,
-                               char_u *texthl, char_u *culhl, char *numhl)
+                               char_u *texthl, char_u *culhl, char_u *culnumhl, char *numhl)
 {
   sign_T *sp_prev;
   sign_T *sp;
@@ -969,6 +971,14 @@ static int sign_define_by_name(char_u *name, char_u *icon, char_u *linehl, char_
       sp->sn_cul_hl = 0;
     } else {
       sp->sn_cul_hl = syn_check_group((char *)culhl, STRLEN(culhl));
+    }
+  }
+
+  if (culnumhl != NULL) {
+    if (*culnumhl == NUL) {
+      sp->sn_cul_num_hl = 0;
+    } else {
+      sp->sn_cul_num_hl = syn_check_group((char *)culnumhl, STRLEN(culnumhl));
     }
   }
 
@@ -1163,6 +1173,7 @@ static void sign_define_cmd(char_u *sign_name, char_u *cmdline)
   char_u *linehl = NULL;
   char_u *texthl = NULL;
   char_u *culhl = NULL;
+  char_u *culnumhl = NULL;
   char_u *numhl = NULL;
   int failed = false;
 
@@ -1193,6 +1204,10 @@ static void sign_define_cmd(char_u *sign_name, char_u *cmdline)
       arg += 6;
       XFREE_CLEAR(culhl);
       culhl = vim_strnsave(arg, (size_t)(p - arg));
+    } else if (STRNCMP(arg, "culnumhl=", 9) == 0) {
+      arg += 9;
+      XFREE_CLEAR(culnumhl);
+      culnumhl = vim_strnsave(arg, (size_t)(p - arg));
     } else if (STRNCMP(arg, "numhl=", 6) == 0) {
       arg += 6;
       XFREE_CLEAR(numhl);
@@ -1205,7 +1220,7 @@ static void sign_define_cmd(char_u *sign_name, char_u *cmdline)
   }
 
   if (!failed) {
-    sign_define_by_name(sign_name, icon, linehl, text, texthl, culhl, (char *)numhl);
+    sign_define_by_name(sign_name, icon, linehl, text, texthl, culhl, culnumhl, (char *)numhl);
   }
 
   xfree(icon);
@@ -1213,6 +1228,7 @@ static void sign_define_cmd(char_u *sign_name, char_u *cmdline)
   xfree(linehl);
   xfree(texthl);
   xfree(culhl);
+  xfree(culnumhl);
   xfree(numhl);
 }
 
@@ -1528,6 +1544,13 @@ static void sign_getinfo(sign_T *sp, dict_T *retdict)
     }
     tv_dict_add_str(retdict, S_LEN("culhl"), p);
   }
+  if (sp->sn_cul_num_hl > 0) {
+    p = get_highlight_name_ext(NULL, sp->sn_cul_num_hl - 1, false);
+    if (p == NULL) {
+      p = "NONE";
+    }
+    tv_dict_add_str(retdict, S_LEN("culnumhl"), p);
+  }
   if (sp->sn_num_hl > 0) {
     p = get_highlight_name_ext(NULL, sp->sn_num_hl - 1, false);
     if (p == NULL) {
@@ -1666,6 +1689,16 @@ static void sign_list_defined(sign_T *sp)
       msg_puts(p);
     }
   }
+  if (sp->sn_cul_num_hl > 0) {
+    msg_puts(" culnumhl=");
+    const char *const p = get_highlight_name_ext(NULL,
+                                                 sp->sn_cul_num_hl - 1, false);
+    if (p == NULL) {
+      msg_puts("NONE");
+    } else {
+      msg_puts(p);
+    }
+  }
   if (sp->sn_num_hl > 0) {
     msg_puts(" numhl=");
     const char *const p = get_highlight_name_ext(NULL,
@@ -1750,7 +1783,7 @@ char *get_sign_name(expand_T *xp, int idx)
   case EXP_SUBCMD:
     return cmds[idx];
   case EXP_DEFINE: {
-    char *define_arg[] = { "culhl=", "icon=", "linehl=", "numhl=", "text=", "texthl=",
+    char *define_arg[] = { "culhl=", "culnumhl=", "icon=", "linehl=", "numhl=", "text=", "texthl=",
                            NULL };
     return define_arg[idx];
   }
@@ -1860,6 +1893,7 @@ void set_context_in_sign_cmd(expand_T *xp, char_u *arg)
       if (STRNCMP(last, "texthl", 6) == 0
           || STRNCMP(last, "linehl", 6) == 0
           || STRNCMP(last, "culhl", 5) == 0
+          || STRNCMP(last, "culnumhl", 8) == 0
           || STRNCMP(last, "numhl", 5) == 0) {
         xp->xp_context = EXPAND_HIGHLIGHT;
       } else if (STRNCMP(last, "icon", 4) == 0) {
@@ -1905,6 +1939,7 @@ static int sign_define_from_dict(const char *name_arg, dict_T *dict)
   char *text = NULL;
   char *texthl = NULL;
   char *culhl = NULL;
+  char *culnumhl = NULL;
   char *numhl = NULL;
   int retval = -1;
 
@@ -1920,16 +1955,17 @@ static int sign_define_from_dict(const char *name_arg, dict_T *dict)
     goto cleanup;
   }
   if (dict != NULL) {
-    icon   = tv_dict_get_string(dict, "icon", true);
-    linehl = tv_dict_get_string(dict, "linehl", true);
-    text   = tv_dict_get_string(dict, "text", true);
-    texthl = tv_dict_get_string(dict, "texthl", true);
-    culhl  = tv_dict_get_string(dict, "culhl", true);
-    numhl  = tv_dict_get_string(dict, "numhl", true);
+    icon     = tv_dict_get_string(dict, "icon", true);
+    linehl   = tv_dict_get_string(dict, "linehl", true);
+    text     = tv_dict_get_string(dict, "text", true);
+    texthl   = tv_dict_get_string(dict, "texthl", true);
+    culhl    = tv_dict_get_string(dict, "culhl", true);
+    culnumhl = tv_dict_get_string(dict, "culnumhl", true);
+    numhl    = tv_dict_get_string(dict, "numhl", true);
   }
 
   if (sign_define_by_name((char_u *)name, (char_u *)icon, (char_u *)linehl,
-                          (char_u *)text, (char_u *)texthl, (char_u *)culhl, numhl)
+                          (char_u *)text, (char_u *)texthl, (char_u *)culhl, (char_u *)culnumhl, numhl)
       == OK) {
     retval = 0;
   }
@@ -1941,6 +1977,7 @@ cleanup:
   xfree(text);
   xfree(texthl);
   xfree(culhl);
+  xfree(culnumhl);
   xfree(numhl);
 
   return retval;
